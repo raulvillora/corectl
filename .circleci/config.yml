@@ -46,6 +46,44 @@ jobs:
           path: ./docs/spec.json
       - setup_remote_docker
       - run:
+          name: Create version.txt
+          command: |
+              set -x
+              if [ -n "${CIRCLE_TAG}" ]; then
+                  version=${CIRCLE_TAG#v}
+              else
+                  version=$(git describe --tags --abbrev=7 --match "v*")
+                  version=${version#v}
+              fi
+              echo "$version" > ./version.txt
+              echo "Building $version"
+      - run:
+          name: Qlik docker login
+          command: echo $DOCKER_TOKEN | docker login -u "$DOCKER_USER" --password-stdin
+      - run:
+          name: Login to Github Project
+          command: echo "$APICULTURIST_TOKEN" | docker login ghcr.io/qlik-trial -u "$APICULTURIST_GITHUB" --password-stdin
+      - run:
+          name: Prepare API Compliance
+          command: |
+            docker pull ghcr.io/qlik-trial/api-compliance
+            docker create -v /specs --name specs alpine:3.4 /bin/true
+            docker cp ./docs/spec.json specs:/specs
+
+      - run:
+          name: Run API Compliance
+          command: >
+            VER=$(cat ./version)
+
+            docker run --volumes-from specs
+            -e SPEC_PATHS="a145e2c1-2466-486a-87df-7089ea703431@/specs/docs/spec.json"
+            -e COMMIT_SHA="$CIRCLE_SHA1"
+            -e RELEASE_TAG="$VER"
+            -e CREDENTIALS_S3_SECRETKEY="$APICULTURIST_S3"
+            -e CREDENTIALS_GITHUB="$APICULTURIST_GITHUB"
+            -e CREDENTIALS_COLONY="$APICULTURIST_TOKEN"
+            ghcr.io/qlik-trial/api-compliance
+      - run:
           name: Run Integration Test
           command: |
             # Spin up environment
@@ -99,6 +137,7 @@ workflows:
   build_and_publish:
     jobs:
       - build:
+          context: api-compliance
           filters:
             tags:
               only:
